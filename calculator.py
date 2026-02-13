@@ -24,9 +24,10 @@ class Calculator:
     def divide(self, a, b):
         """
         Divide a by b
-        BUG: This will crash if b is 0
+        Raises ValueError if b is zero
         """
-        # TODO: Add zero division handling
+        if b == 0:
+            raise ValueError("Cannot divide by zero")
         return a / b
     
     def power(self, base, exponent):
@@ -36,9 +37,10 @@ class Calculator:
     def sqrt(self, number):
         """
         Calculate square root of a number
-        BUG: This will crash for negative numbers
+        Raises ValueError if number is negative
         """
-        # TODO: Add negative number handling
+        if number < 0:
+            raise ValueError("Cannot calculate square root of negative number")
         return math.sqrt(number)
     
     def percentage(self, value, percent):
