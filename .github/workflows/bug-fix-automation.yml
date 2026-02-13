@@ -99,9 +99,28 @@ jobs:
           api_token = os.environ['JIRA_API_TOKEN']
           issue_key = os.environ['ISSUE_KEY']
           
-          # Transition to In Progress (transition ID may vary)
-          url = f"{jira_url}/rest/api/3/issue/{issue_key}/transitions"
+          # Check current status first
+          url = f"{jira_url}/rest/api/3/issue/{issue_key}"
           auth = HTTPBasicAuth(email, api_token)
+          headers = {"Accept": "application/json"}
+          
+          response = requests.get(url, headers=headers, auth=auth)
+          if response.status_code == 200:
+              issue = response.json()
+              current_status = issue['fields']['status']['name']
+              print(f"Current status: {current_status}")
+              
+              # Don't process if already done or in progress
+              if current_status.lower() in ['done', 'closed', 'resolved']:
+                  print(f"⚠️  Issue is already {current_status}. Exiting.")
+                  exit(1)
+              
+              if current_status.lower() == 'in progress':
+                  print("⚠️  Issue is already In Progress. A PR may already exist.")
+                  exit(1)
+          
+          # Transition to In Progress
+          url = f"{jira_url}/rest/api/3/issue/{issue_key}/transitions"
           headers = {"Accept": "application/json", "Content-Type": "application/json"}
           
           # Get available transitions
@@ -465,5 +484,31 @@ jobs:
           }
           
           response = requests.post(url, json=comment, headers=headers, auth=auth)
-          print("✅ Updated Jira with test results")
+          print("✅ Added comment to Jira")
+          
+          # Now transition to Done/Closed
+          url = f"{jira_url}/rest/api/3/issue/{issue_key}/transitions"
+          
+          # Get available transitions
+          response = requests.get(url, headers=headers, auth=auth)
+          if response.status_code == 200:
+              transitions = response.json()['transitions']
+              print(f"Available transitions: {[t['name'] for t in transitions]}")
+              
+              # Try to find Done, Closed, or Resolved transition
+              done_transition = next(
+                  (t for t in transitions if t['name'].lower() in ['done', 'closed', 'resolve', 'resolved']), 
+                  None
+              )
+              
+              if done_transition:
+                  # Transition to Done
+                  data = {"transition": {"id": done_transition['id']}}
+                  response = requests.post(url, json=data, headers=headers, auth=auth)
+                  if response.status_code in [200, 204]:
+                      print(f"✅ Transitioned issue to: {done_transition['name']}")
+                  else:
+                      print(f"⚠️  Failed to transition: {response.status_code}")
+              else:
+                  print("⚠️  No 'Done' or 'Closed' transition found")
           EOF
