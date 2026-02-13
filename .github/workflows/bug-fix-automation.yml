@@ -198,7 +198,7 @@ jobs:
       
       - name: Apply fixes to code
         run: |
-          python3 <<'PYTHON_SCRIPT'
+          python3 <<'EOF'
           import re
           
           # Read the current calculator.py
@@ -208,26 +208,26 @@ jobs:
           # Define the buggy divide method pattern
           divide_pattern = r'def divide\(self, a, b\):.*?return a / b'
           
-          divide_fixed = '''def divide(self, a, b):
-        """
+          divide_fixed = """def divide(self, a, b):
+        \"\"\"
         Divide a by b
         Raises ValueError if b is zero
-        """
+        \"\"\"
         if b == 0:
             raise ValueError("Cannot divide by zero")
-        return a / b'''
+        return a / b"""
           
           # Define the buggy sqrt method pattern
           sqrt_pattern = r'def sqrt\(self, number\):.*?return math\.sqrt\(number\)'
           
-          sqrt_fixed = '''def sqrt(self, number):
-        """
+          sqrt_fixed = """def sqrt(self, number):
+        \"\"\"
         Calculate square root of a number
         Raises ValueError if number is negative
-        """
+        \"\"\"
         if number < 0:
             raise ValueError("Cannot calculate square root of negative number")
-        return math.sqrt(number)'''
+        return math.sqrt(number)"""
           
           # Apply fixes using regex
           original_content = content
@@ -249,7 +249,7 @@ jobs:
               f.write(content)
           
           print("✅ Applied fixes to calculator.py")
-          PYTHON_SCRIPT
+          EOF
       
       - name: Run tests after fix
         id: final_tests
