@@ -22,12 +22,13 @@ class Calculator:
         return a * b
     
     def divide(self, a, b):
-        """
-        Divide a by b
-        BUG: This will crash if b is 0
-        """
-        # TODO: Add zero division handling
-        return a / b
+    """
+    Divide a by b
+    Raises ValueError if b is zero
+    """
+    if b == 0:
+        raise ValueError("Cannot divide by zero")
+    return a / b
     
     def power(self, base, exponent):
         """Raise base to the power of exponent"""
