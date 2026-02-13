@@ -195,48 +195,70 @@ jobs:
           else:
               print("⚠️  Could not identify specific fix")
           EOF
-      
       - name: Apply fixes to code
         run: |
-          python - <<'EOF'
+          python3 << 'PYTHON_SCRIPT'
           import re
           
           # Read the current calculator.py
           with open('calculator.py', 'r') as f:
               content = f.read()
           
-          # Fix divide method
-          divide_pattern = r'def divide\(self, a, b\):.*?return a / b'
-          divide_fix = '''def divide(self, a, b):
-          """
-          Divide a by b
-          Raises ValueError if b is zero
-          """
-          if b == 0:
-              raise ValueError("Cannot divide by zero")
-          return a / b'''
+          # Fix divide method - more robust pattern
+          divide_old = '''    def divide(self, a, b):
+        """
+        Divide a by b
+        BUG: This will crash if b is 0
+        """
+        # TODO: Add zero division handling
+        return a / b'''
           
-          content = re.sub(divide_pattern, divide_fix, content, flags=re.DOTALL)
+          divide_new = '''    def divide(self, a, b):
+        """
+        Divide a by b
+        Raises ValueError if b is zero
+        """
+        if b == 0:
+            raise ValueError("Cannot divide by zero")
+        return a / b'''
           
-          # Fix sqrt method
-          sqrt_pattern = r'def sqrt\(self, number\):.*?return math\.sqrt\(number\)'
-          sqrt_fix = '''def sqrt(self, number):
-          """
-          Calculate square root of a number
-          Raises ValueError if number is negative
-          """
-          if number < 0:
-              raise ValueError("Cannot calculate square root of negative number")
-          return math.sqrt(number)'''
+          # Fix sqrt method - more robust pattern
+          sqrt_old = '''    def sqrt(self, number):
+        """
+        Calculate square root of a number
+        BUG: This will crash for negative numbers
+        """
+        # TODO: Add negative number handling
+        return math.sqrt(number)'''
           
-          content = re.sub(sqrt_pattern, sqrt_fix, content, flags=re.DOTALL)
+          sqrt_new = '''    def sqrt(self, number):
+        """
+        Calculate square root of a number
+        Raises ValueError if number is negative
+        """
+        if number < 0:
+            raise ValueError("Cannot calculate square root of negative number")
+        return math.sqrt(number)'''
+          
+          # Apply fixes
+          if divide_old in content:
+              content = content.replace(divide_old, divide_new)
+              print("✅ Fixed divide method")
+          else:
+              print("⚠️  Divide method already fixed or pattern not found")
+          
+          if sqrt_old in content:
+              content = content.replace(sqrt_new, sqrt_new)
+              print("✅ Fixed sqrt method")
+          else:
+              print("⚠️  Sqrt method already fixed or pattern not found")
           
           # Write back
           with open('calculator.py', 'w') as f:
               f.write(content)
           
           print("✅ Applied fixes to calculator.py")
-          EOF
+          PYTHON_SCRIPT
       
       - name: Run tests after fix
         id: final_tests
