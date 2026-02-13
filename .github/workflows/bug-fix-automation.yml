@@ -195,25 +195,20 @@ jobs:
           else:
               print("⚠️  Could not identify specific fix")
           EOF
+      
       - name: Apply fixes to code
         run: |
-          python3 << 'PYTHON_SCRIPT'
+          python3 <<'PYTHON_SCRIPT'
           import re
           
           # Read the current calculator.py
           with open('calculator.py', 'r') as f:
               content = f.read()
           
-          # Fix divide method - more robust pattern
-          divide_old = '''    def divide(self, a, b):
-        """
-        Divide a by b
-        BUG: This will crash if b is 0
-        """
-        # TODO: Add zero division handling
-        return a / b'''
+          # Define the buggy divide method pattern
+          divide_pattern = r'def divide\(self, a, b\):.*?return a / b'
           
-          divide_new = '''    def divide(self, a, b):
+          divide_fixed = '''def divide(self, a, b):
         """
         Divide a by b
         Raises ValueError if b is zero
@@ -222,16 +217,10 @@ jobs:
             raise ValueError("Cannot divide by zero")
         return a / b'''
           
-          # Fix sqrt method - more robust pattern
-          sqrt_old = '''    def sqrt(self, number):
-        """
-        Calculate square root of a number
-        BUG: This will crash for negative numbers
-        """
-        # TODO: Add negative number handling
-        return math.sqrt(number)'''
+          # Define the buggy sqrt method pattern
+          sqrt_pattern = r'def sqrt\(self, number\):.*?return math\.sqrt\(number\)'
           
-          sqrt_new = '''    def sqrt(self, number):
+          sqrt_fixed = '''def sqrt(self, number):
         """
         Calculate square root of a number
         Raises ValueError if number is negative
@@ -240,18 +229,20 @@ jobs:
             raise ValueError("Cannot calculate square root of negative number")
         return math.sqrt(number)'''
           
-          # Apply fixes
-          if divide_old in content:
-              content = content.replace(divide_old, divide_new)
+          # Apply fixes using regex
+          original_content = content
+          content = re.sub(divide_pattern, divide_fixed, content, flags=re.DOTALL)
+          if content != original_content:
               print("✅ Fixed divide method")
+              original_content = content
           else:
-              print("⚠️  Divide method already fixed or pattern not found")
+              print("⚠️  Divide method pattern not found or already fixed")
           
-          if sqrt_old in content:
-              content = content.replace(sqrt_new, sqrt_new)
+          content = re.sub(sqrt_pattern, sqrt_fixed, content, flags=re.DOTALL)
+          if content != original_content:
               print("✅ Fixed sqrt method")
           else:
-              print("⚠️  Sqrt method already fixed or pattern not found")
+              print("⚠️  Sqrt method pattern not found or already fixed")
           
           # Write back
           with open('calculator.py', 'w') as f:
