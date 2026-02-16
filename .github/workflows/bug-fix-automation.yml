@@ -1,199 +1,6 @@
-name: Bug Fix Automation
-
-on:
-  workflow_dispatch:
-    inputs:
-      jira_issue_key:
-        description: 'Jira Issue Key (e.g., BAP-1)'
-        required: true
-        type: string
-  repository_dispatch:
-    types: [jira-bug-created]
-
-env:
-  PYTHON_VERSION: '3.11'
-
-jobs:
-  analyze-and-fix-bug:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      
-      - name: Install dependencies
+- name: Apply fixes to code
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      
-      - name: Get Jira issue details
-        id: jira
-        env:
-          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
-          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-          ISSUE_KEY: ${{ github.event.inputs.jira_issue_key }}
-        run: |
-          python - <<'EOF'
-          import os
-          import json
-          import requests
-          from requests.auth import HTTPBasicAuth
-          
-          jira_url = os.environ['JIRA_BASE_URL']
-          email = os.environ['JIRA_USER_EMAIL']
-          api_token = os.environ['JIRA_API_TOKEN']
-          issue_key = os.environ['ISSUE_KEY']
-          
-          # Fetch issue details
-          url = f"{jira_url}/rest/api/3/issue/{issue_key}"
-          auth = HTTPBasicAuth(email, api_token)
-          headers = {"Accept": "application/json"}
-          
-          response = requests.get(url, headers=headers, auth=auth)
-          
-          if response.status_code == 200:
-              issue = response.json()
-              summary = issue['fields']['summary']
-              description = issue['fields']['description']['content'][0]['content'][0]['text'] if issue['fields'].get('description') else ''
-              
-              # Save to environment
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  f.write(f"issue_key={issue_key}\n")
-                  f.write(f"summary={summary}\n")
-                  f.write(f"description<<EOF\n{description}\nEOF\n")
-              
-              print(f"✅ Fetched Jira issue: {issue_key}")
-              print(f"   Summary: {summary}")
-          else:
-              print(f"❌ Failed to fetch issue: {response.status_code}")
-              print(f"   Response: {response.text}")
-              exit(1)
-          EOF
-      
-      - name: Update Jira status to In Progress
-        continue-on-error: true
-        env:
-          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
-          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-          ISSUE_KEY: ${{ steps.jira.outputs.issue_key }}
-        run: |
-          python - <<'EOF'
-          import os
-          import requests
-          from requests.auth import HTTPBasicAuth
-          
-          jira_url = os.environ['JIRA_BASE_URL']
-          email = os.environ['JIRA_USER_EMAIL']
-          api_token = os.environ['JIRA_API_TOKEN']
-          issue_key = os.environ['ISSUE_KEY']
-          
-          # Check current status first
-          url = f"{jira_url}/rest/api/3/issue/{issue_key}"
-          auth = HTTPBasicAuth(email, api_token)
-          headers = {"Accept": "application/json"}
-          
-          response = requests.get(url, headers=headers, auth=auth)
-          if response.status_code == 200:
-              issue = response.json()
-              current_status = issue['fields']['status']['name']
-              print(f"Current status: {current_status}")
-              
-              # Only transition if not already in progress
-              if current_status.lower() == 'in progress':
-                  print("ℹ️  Issue is already In Progress. Continuing workflow...")
-                  exit(0)
-              
-              # Don't process if already done
-              if current_status.lower() in ['done', 'closed', 'resolved']:
-                  print(f"⚠️  Issue is already {current_status}.")
-                  exit(0)
-          
-          # Transition to In Progress
-          url = f"{jira_url}/rest/api/3/issue/{issue_key}/transitions"
-          headers = {"Accept": "application/json", "Content-Type": "application/json"}
-          
-          # Get available transitions
-          response = requests.get(url, headers=headers, auth=auth)
-          if response.status_code == 200:
-              transitions = response.json()['transitions']
-              in_progress = next((t for t in transitions if 'progress' in t['name'].lower()), None)
-              
-              if in_progress:
-                  # Transition to In Progress
-                  data = {"transition": {"id": in_progress['id']}}
-                  response = requests.post(url, json=data, headers=headers, auth=auth)
-                  print(f"✅ Updated Jira status to: {in_progress['name']}")
-              else:
-                  print("ℹ️  'In Progress' transition not found (issue may already be in correct status)")
-          EOF
-      
-      - name: Run existing tests (to confirm bug)
-        id: initial_tests
-        continue-on-error: true
-        run: |
-          echo "Running tests to confirm the bug..."
-          python -m pytest test_calculator.py -v --tb=short > test_output.txt 2>&1 || true
-          cat test_output.txt
-      
-      - name: Analyze bug and create fix
-        id: fix
-        env:
-          ISSUE_SUMMARY: ${{ steps.jira.outputs.summary }}
-          ISSUE_DESCRIPTION: ${{ steps.jira.outputs.description }}
-        run: |
-          python - <<'EOF'
-          import os
-          import re
-          
-          summary = os.environ.get('ISSUE_SUMMARY', '')
-          description = os.environ.get('ISSUE_DESCRIPTION', '')
-          
-          print("🔍 Analyzing bug...")
-          print(f"   Summary: {summary}")
-          print(f"   Description: {description}")
-          
-          # Simple bug detection and fix generation
-          
-          fixes = []
-          
-          # Check for division by zero bug
-          if 'divide' in summary.lower() or 'zero' in summary.lower():
-              fixes.append({
-                  'file': 'calculator.py',
-                  'function': 'divide',
-                  'bug': 'No zero division handling',
-              })
-          
-          # Check for sqrt of negative bug
-          if 'sqrt' in summary.lower() or 'negative' in summary.lower():
-              fixes.append({
-                  'file': 'calculator.py',
-                  'function': 'sqrt',
-                  'bug': 'No negative number handling',
-              })
-          
-          if fixes:
-              print(f"✅ Identified {len(fixes)} bug(s) to fix")
-          else:
-              print("⚠️  Could not identify specific fix")
-          EOF
-      
-      - name: Apply fixes to code
-        run: |
-          python3 << 'PYTHON_SCRIPT'
+          cat > fix_code.py << 'ENDOFPYTHON'
           # Read the current calculator.py
           with open('calculator.py', 'r') as f:
               content = f.read()
@@ -201,22 +8,22 @@ jobs:
           original_content = content
           
           # Fix divide method - use exact string replacement
-          divide_old = '''    def divide(self, a, b):
-        """
+          divide_old = """    def divide(self, a, b):
+        \"\"\"
         Divide a by b
         BUG: This will crash if b is 0
-        """
+        \"\"\"
         # TODO: Add zero division handling
-        return a / b'''
+        return a / b"""
           
-          divide_new = '''    def divide(self, a, b):
-        """
+          divide_new = """    def divide(self, a, b):
+        \"\"\"
         Divide a by b
         Raises ValueError if b is zero
-        """
+        \"\"\"
         if b == 0:
             raise ValueError("Cannot divide by zero")
-        return a / b'''
+        return a / b"""
           
           if divide_old in content:
               content = content.replace(divide_old, divide_new)
@@ -225,22 +32,22 @@ jobs:
               print("ℹ️  Divide method already fixed or pattern not found")
           
           # Fix sqrt method - use exact string replacement
-          sqrt_old = '''    def sqrt(self, number):
-        """
+          sqrt_old = """    def sqrt(self, number):
+        \"\"\"
         Calculate square root of a number
         BUG: This will crash for negative numbers
-        """
+        \"\"\"
         # TODO: Add negative number handling
-        return math.sqrt(number)'''
+        return math.sqrt(number)"""
           
-          sqrt_new = '''    def sqrt(self, number):
-        """
+          sqrt_new = """    def sqrt(self, number):
+        \"\"\"
         Calculate square root of a number
         Raises ValueError if number is negative
-        """
+        \"\"\"
         if number < 0:
             raise ValueError("Cannot calculate square root of negative number")
-        return math.sqrt(number)'''
+        return math.sqrt(number)"""
           
           if sqrt_old in content:
               content = content.replace(sqrt_old, sqrt_new)
@@ -256,145 +63,6 @@ jobs:
               print("✅ Applied fixes to calculator.py")
           else:
               print("ℹ️  No changes needed to calculator.py")
-          PYTHON_SCRIPT
-      
-      - name: Run tests after fix
-        id: final_tests
-        run: |
-          echo "Running tests after applying fixes..."
-          python -m pytest test_calculator.py -v --tb=short
-          echo "✅ All tests passed!"
-      
-      - name: Generate GitHub token
-        id: generate_token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-      
-      - name: Create Pull Request
-        id: create_pr
-        env:
-          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
-          ISSUE_KEY: ${{ steps.jira.outputs.issue_key }}
-          ISSUE_SUMMARY: ${{ steps.jira.outputs.summary }}
-        run: |
-          # Configure git
-          git config user.name "Bug Fix Bot"
-          git config user.email "bugfix-bot@example.com"
+          ENDOFPYTHON
           
-          # Create branch
-          BRANCH_NAME="fix/$ISSUE_KEY-$(date +%s)"
-          git checkout -b "$BRANCH_NAME"
-          
-          # Commit changes
-          git add calculator.py
-          git commit -m "Fix: $ISSUE_SUMMARY
-
-          - Added zero division handling in divide()
-          - Added negative number handling in sqrt()
-          - All tests now passing
-          
-          Resolves: $ISSUE_KEY"
-          
-          # Push branch
-          git push origin "$BRANCH_NAME"
-          
-          # Create PR
-          PR_BODY="## 🤖 Automated Bug Fix
-
-          **Jira Issue:** [$ISSUE_KEY](${{ secrets.JIRA_BASE_URL }}/browse/$ISSUE_KEY)
-          **Summary:** $ISSUE_SUMMARY
-
-          ### Changes Made:
-          - ✅ Added zero division check in \`divide()\` method
-          - ✅ Added negative number validation in \`sqrt()\` method
-          - ✅ All tests passing
-
-          ### Next Steps:
-          1. Review the changes
-          2. Merge this PR
-          3. Jira ticket will be updated
-
-          ---
-          🤖 *This PR was created automatically by the Bug Fix Automation workflow*"
-          
-          gh pr create \
-            --title "Fix: $ISSUE_SUMMARY [$ISSUE_KEY]" \
-            --body "$PR_BODY" \
-            --base main \
-            --head "$BRANCH_NAME"
-          
-          # Get PR number
-          PR_NUMBER=$(gh pr list --head "$BRANCH_NAME" --json number --jq '.[0].number')
-          PR_URL=$(gh pr list --head "$BRANCH_NAME" --json url --jq '.[0].url')
-          
-          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
-          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
-          
-          echo "✅ Created PR #$PR_NUMBER"
-      
-      - name: Add comment to Jira
-        continue-on-error: true
-        env:
-          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
-          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-          ISSUE_KEY: ${{ steps.jira.outputs.issue_key }}
-          PR_URL: ${{ steps.create_pr.outputs.pr_url }}
-        run: |
-          python - <<'EOF'
-          import os
-          import requests
-          from requests.auth import HTTPBasicAuth
-          
-          jira_url = os.environ['JIRA_BASE_URL']
-          email = os.environ['JIRA_USER_EMAIL']
-          api_token = os.environ['JIRA_API_TOKEN']
-          issue_key = os.environ['ISSUE_KEY']
-          pr_url = os.environ['PR_URL']
-          
-          # Add comment
-          url = f"{jira_url}/rest/api/3/issue/{issue_key}/comment"
-          auth = HTTPBasicAuth(email, api_token)
-          headers = {"Accept": "application/json", "Content-Type": "application/json"}
-          
-          comment = {
-              "body": {
-                  "type": "doc",
-                  "version": 1,
-                  "content": [
-                      {
-                          "type": "paragraph",
-                          "content": [
-                              {
-                                  "type": "text",
-                                  "text": "🤖 Automated fix created! "
-                              },
-                              {
-                                  "type": "text",
-                                  "text": "View Pull Request",
-                                  "marks": [{"type": "link", "attrs": {"href": pr_url}}]
-                              }
-                          ]
-                      },
-                      {
-                          "type": "paragraph",
-                          "content": [
-                              {
-                                  "type": "text",
-                                  "text": "✅ All tests passing\n✅ Ready for review"
-                              }
-                          ]
-                      }
-                  ]
-              }
-          }
-          
-          response = requests.post(url, json=comment, headers=headers, auth=auth)
-          if response.status_code in [200, 201]:
-              print("✅ Added comment to Jira")
-          else:
-              print(f"⚠️  Failed to add comment: {response.status_code}")
-          EOF
+          python3 fix_code.py
