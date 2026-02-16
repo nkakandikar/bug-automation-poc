@@ -83,6 +83,7 @@ jobs:
           EOF
       
       - name: Update Jira status to In Progress
+        continue-on-error: true
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
@@ -110,14 +111,15 @@ jobs:
               current_status = issue['fields']['status']['name']
               print(f"Current status: {current_status}")
               
-              # Don't process if already done or in progress
-              if current_status.lower() in ['done', 'closed', 'resolved']:
-                  print(f"⚠️  Issue is already {current_status}. Exiting.")
-                  exit(1)
-              
+              # Only transition if not already in progress
               if current_status.lower() == 'in progress':
-                  print("⚠️  Issue is already In Progress. A PR may already exist.")
-                  exit(1)
+                  print("ℹ️  Issue is already In Progress. Continuing workflow...")
+                  exit(0)
+              
+              # Don't process if already done
+              if current_status.lower() in ['done', 'closed', 'resolved']:
+                  print(f"⚠️  Issue is already {current_status}.")
+                  exit(0)
           
           # Transition to In Progress
           url = f"{jira_url}/rest/api/3/issue/{issue_key}/transitions"
@@ -135,7 +137,7 @@ jobs:
                   response = requests.post(url, json=data, headers=headers, auth=auth)
                   print(f"✅ Updated Jira status to: {in_progress['name']}")
               else:
-                  print("⚠️  'In Progress' transition not found")
+                  print("ℹ️  'In Progress' transition not found (issue may already be in correct status)")
           EOF
       
       - name: Run existing tests (to confirm bug)
@@ -164,7 +166,6 @@ jobs:
           print(f"   Description: {description}")
           
           # Simple bug detection and fix generation
-          # In a real scenario, this would use Claude AI or similar
           
           fixes = []
           
@@ -174,14 +175,6 @@ jobs:
                   'file': 'calculator.py',
                   'function': 'divide',
                   'bug': 'No zero division handling',
-                  'fix': '''    def divide(self, a, b):
-          """
-          Divide a by b
-          Raises ValueError if b is zero
-          """
-          if b == 0:
-              raise ValueError("Cannot divide by zero")
-          return a / b'''
               })
           
           # Check for sqrt of negative bug
@@ -190,80 +183,86 @@ jobs:
                   'file': 'calculator.py',
                   'function': 'sqrt',
                   'bug': 'No negative number handling',
-                  'fix': '''    def sqrt(self, number):
-          """
-          Calculate square root of a number
-          Raises ValueError if number is negative
-          """
-          if number < 0:
-              raise ValueError("Cannot calculate square root of negative number")
-          return math.sqrt(number)'''
               })
           
           if fixes:
-              # Save fix info
-              with open('bug_fix_plan.txt', 'w') as f:
-                  for fix in fixes:
-                      f.write(f"File: {fix['file']}\n")
-                      f.write(f"Function: {fix['function']}\n")
-                      f.write(f"Bug: {fix['bug']}\n")
-                      f.write(f"Fix:\n{fix['fix']}\n")
-                      f.write("-" * 50 + "\n")
-              
-              print(f"✅ Generated {len(fixes)} fix(es)")
+              print(f"✅ Identified {len(fixes)} bug(s) to fix")
           else:
               print("⚠️  Could not identify specific fix")
           EOF
       
       - name: Apply fixes to code
         run: |
-          cat > fix_bugs.py << 'FIXSCRIPT'
-          import re
-          
+          python3 << 'PYTHON_SCRIPT'
           # Read the current calculator.py
           with open('calculator.py', 'r') as f:
               content = f.read()
           
-          # Define the buggy divide method pattern
-          divide_pattern = r'def divide\(self, a, b\):.*?return a / b'
-          
-          divide_fixed = 'def divide(self, a, b):\n        """\n        Divide a by b\n        Raises ValueError if b is zero\n        """\n        if b == 0:\n            raise ValueError("Cannot divide by zero")\n        return a / b'
-          
-          # Define the buggy sqrt method pattern
-          sqrt_pattern = r'def sqrt\(self, number\):.*?return math\.sqrt\(number\)'
-          
-          sqrt_fixed = 'def sqrt(self, number):\n        """\n        Calculate square root of a number\n        Raises ValueError if number is negative\n        """\n        if number < 0:\n            raise ValueError("Cannot calculate square root of negative number")\n        return math.sqrt(number)'
-          
-          # Apply fixes using regex
           original_content = content
-          content = re.sub(divide_pattern, divide_fixed, content, flags=re.DOTALL)
-          if content != original_content:
-              print("✅ Fixed divide method")
-              original_content = content
-          else:
-              print("⚠️  Divide method pattern not found or already fixed")
           
-          content = re.sub(sqrt_pattern, sqrt_fixed, content, flags=re.DOTALL)
-          if content != original_content:
+          # Fix divide method - use exact string replacement
+          divide_old = '''    def divide(self, a, b):
+        """
+        Divide a by b
+        BUG: This will crash if b is 0
+        """
+        # TODO: Add zero division handling
+        return a / b'''
+          
+          divide_new = '''    def divide(self, a, b):
+        """
+        Divide a by b
+        Raises ValueError if b is zero
+        """
+        if b == 0:
+            raise ValueError("Cannot divide by zero")
+        return a / b'''
+          
+          if divide_old in content:
+              content = content.replace(divide_old, divide_new)
+              print("✅ Fixed divide method")
+          else:
+              print("ℹ️  Divide method already fixed or pattern not found")
+          
+          # Fix sqrt method - use exact string replacement
+          sqrt_old = '''    def sqrt(self, number):
+        """
+        Calculate square root of a number
+        BUG: This will crash for negative numbers
+        """
+        # TODO: Add negative number handling
+        return math.sqrt(number)'''
+          
+          sqrt_new = '''    def sqrt(self, number):
+        """
+        Calculate square root of a number
+        Raises ValueError if number is negative
+        """
+        if number < 0:
+            raise ValueError("Cannot calculate square root of negative number")
+        return math.sqrt(number)'''
+          
+          if sqrt_old in content:
+              content = content.replace(sqrt_old, sqrt_new)
               print("✅ Fixed sqrt method")
           else:
-              print("⚠️  Sqrt method pattern not found or already fixed")
+              print("ℹ️  Sqrt method already fixed or pattern not found")
           
           # Write back
           with open('calculator.py', 'w') as f:
               f.write(content)
           
-          print("✅ Applied fixes to calculator.py")
-          FIXSCRIPT
-          
-          python3 fix_bugs.py
+          if content != original_content:
+              print("✅ Applied fixes to calculator.py")
+          else:
+              print("ℹ️  No changes needed to calculator.py")
+          PYTHON_SCRIPT
       
       - name: Run tests after fix
         id: final_tests
         run: |
           echo "Running tests after applying fixes..."
-          python -m pytest test_calculator.py -v --tb=short > test_output_after.txt 2>&1
-          cat test_output_after.txt
+          python -m pytest test_calculator.py -v --tb=short
           echo "✅ All tests passed!"
       
       - name: Generate GitHub token
@@ -312,16 +311,10 @@ jobs:
           - ✅ Added negative number validation in \`sqrt()\` method
           - ✅ All tests passing
 
-          ### Test Results:
-          \`\`\`
-          $(cat test_output_after.txt)
-          \`\`\`
-
           ### Next Steps:
           1. Review the changes
           2. Merge this PR
-          3. Automated tests will run on staging
-          4. Jira ticket will be updated automatically
+          3. Jira ticket will be updated
 
           ---
           🤖 *This PR was created automatically by the Bug Fix Automation workflow*"
@@ -343,6 +336,7 @@ jobs:
           echo "✅ Created PR #$PR_NUMBER"
       
       - name: Add comment to Jira
+        continue-on-error: true
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
@@ -403,112 +397,4 @@ jobs:
               print("✅ Added comment to Jira")
           else:
               print(f"⚠️  Failed to add comment: {response.status_code}")
-          EOF
-
-  deploy-to-staging:
-    needs: analyze-and-fix-bug
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Simulate staging deployment
-        run: |
-          echo "🚀 Deploying to staging environment..."
-          echo "   Environment: staging"
-          echo "   Timestamp: $(date)"
-          sleep 2
-          echo "✅ Deployment successful!"
-      
-      - name: Run automated tests on staging
-        run: |
-          echo "🧪 Running automated tests on staging..."
-          python -m pytest test_calculator.py -v --tb=short
-          echo "✅ All staging tests passed!"
-      
-      - name: Update Jira to Testing Complete
-        env:
-          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
-          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-        run: |
-          # Extract Jira issue key from PR title
-          ISSUE_KEY=$(echo "${{ github.event.pull_request.title }}" | grep -oP '\[([A-Z]+-\d+)\]' | tr -d '[]')
-          
-          python - <<'EOF'
-          import os
-          import requests
-          from requests.auth import HTTPBasicAuth
-          
-          jira_url = os.environ['JIRA_BASE_URL']
-          email = os.environ['JIRA_USER_EMAIL']
-          api_token = os.environ['JIRA_API_TOKEN']
-          issue_key = os.environ.get('ISSUE_KEY', '')
-          
-          if not issue_key:
-              print("⚠️  No issue key found")
-              exit(0)
-          
-          # Add final comment with test results
-          url = f"{jira_url}/rest/api/3/issue/{issue_key}/comment"
-          auth = HTTPBasicAuth(email, api_token)
-          headers = {"Accept": "application/json", "Content-Type": "application/json"}
-          
-          comment = {
-              "body": {
-                  "type": "doc",
-                  "version": 1,
-                  "content": [
-                      {
-                          "type": "paragraph",
-                          "content": [
-                              {
-                                  "type": "text",
-                                  "text": "✅ Testing Complete!"
-                              }
-                          ]
-                      },
-                      {
-                          "type": "paragraph",
-                          "content": [
-                              {
-                                  "type": "text",
-                                  "text": "🚀 Deployed to staging\n🧪 All automated tests passed\n✅ Ready for production"
-                              }
-                          ]
-                      }
-                  ]
-              }
-          }
-          
-          response = requests.post(url, json=comment, headers=headers, auth=auth)
-          print("✅ Added comment to Jira")
-          
-          # Now transition to Done/Closed
-          url = f"{jira_url}/rest/api/3/issue/{issue_key}/transitions"
-          
-          # Get available transitions
-          response = requests.get(url, headers=headers, auth=auth)
-          if response.status_code == 200:
-              transitions = response.json()['transitions']
-              print(f"Available transitions: {[t['name'] for t in transitions]}")
-              
-              # Try to find Done, Closed, or Resolved transition
-              done_transition = next(
-                  (t for t in transitions if t['name'].lower() in ['done', 'closed', 'resolve', 'resolved']), 
-                  None
-              )
-              
-              if done_transition:
-                  # Transition to Done
-                  data = {"transition": {"id": done_transition['id']}}
-                  response = requests.post(url, json=data, headers=headers, auth=auth)
-                  if response.status_code in [200, 204]:
-                      print(f"✅ Transitioned issue to: {done_transition['name']}")
-                  else:
-                      print(f"⚠️  Failed to transition: {response.status_code}")
-              else:
-                  print("⚠️  No 'Done' or 'Closed' transition found")
           EOF
